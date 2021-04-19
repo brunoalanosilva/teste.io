@@ -1,0 +1,260 @@
+---
+title: "Relatorio"
+author: "Bruno Alano"
+date: "4/19/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(spdep)
+library(INLA)
+library(DT)
+library(leaflet)
+library(tidyverse)
+library(hrbrthemes)
+library(plotly)
+library(sf)
+library(ps)
+library(spdep) #######?###########
+library(kableExtra)
+
+```
+
+
+```{r include=FALSE}
+localarquivo <- function(x){ ### Criei essa funcao caso seja necessario mudar a pasta 
+  str_c(here::here(),"/",x)
+}
+banco_cid <- utils::read.csv(file= localarquivo("dados/banco_nascimentos_anomalias.csv")) %>%
+  rename(ANO_NASC = ANONASC)
+
+banco_nascimentos <- utils::read.csv(localarquivo("dados/banco_nascimentos.csv")) %>%
+  filter(CODMUNRES != 350000)
+
+mapa <- sf::st_read(localarquivo("shapefiles/municipios/35MUE250GC_SIR.shp"), quiet = TRUE, options = "ENCODING=UTF-8") %>%
+  mutate(municipio= str_to_lower(NM_MUNICIP), CODMUNRES = as.numeric(as.character(substring(CD_GEOCMU,1,6)))) #%>%
+```
+
+
+```{r include=FALSE}
+options(OutDec= ".")
+banco_aux <- banco_cid %>%
+  filter(cid_num %in% 1) %>%
+  group_by(NUMERODN) %>%
+  summarise(ANO_NASC = unique(ANO_NASC),CODMUNRES = unique(CODMUNRES))
+
+banco_aux2 <- banco_aux %>%
+  group_by(ANO_NASC,CODMUNRES) %>%
+  summarise(nascidos_vivos_anomalia = n())
+
+
+banco_aux3 <- banco_nascimentos %>%
+  left_join(banco_aux2,by  = c("CODMUNRES","ANO_NASC" = "ANO_NASC")) %>%
+  mutate(nascidos_vivos_anomalia = replace_na(nascidos_vivos_anomalia, 0),prevalencia = nascidos_vivos_anomalia/numero_nascidos_vivos*10^4) %>%
+  mutate(prevalencia = ifelse(is.nan(prevalencia),0,prevalencia)) 
+banco_aux3 #
+
+banco_final <- banco_aux3 %>%
+  #filter(ANO_NASC %in% input$ano_grafico_cid) %>%
+  group_by(CODMUNRES,NOMEMUN) %>%
+  summarise(numero_nascidos_vivos = sum(numero_nascidos_vivos),nascidos_vivos_anomalia = sum(nascidos_vivos_anomalia),
+            prevalencia  = nascidos_vivos_anomalia*10^4/numero_nascidos_vivos)
+```
+
+
+## SMR
+
+```{r}
+proporcao_media <- sum(banco_final$nascidos_vivos_anomalia)/sum(banco_final$numero_nascidos_vivos)
+valor_esperado <- banco_final$numero_nascidos_vivos*proporcao_media
+banco_final$valor_esperado <- valor_esperado
+banco_final$smr <- banco_final$nascidos_vivos_anomalia/valor_esperado
+```
+
+
+### Mapa
+
+```{r}
+tidy <- banco_final %>%
+  left_join(mapa,by = c("CODMUNRES"))
+tidy = st_as_sf(tidy)
+tidy <- st_transform(tidy, "+init=epsg:4326") 
+
+#mapa
+cores_legenda <- colorNumeric("RdYlBu", domain = tidy$smr, reverse = TRUE)
+
+legenda_reativa <- sprintf(
+  "<strong> Municipio: %s </strong> <br/> valor esperado: %s <br/> Número anomalias: %s <br/>  smr: %s", #escrita estatica
+  tidy$NOMEMUN,tidy$valor_esperado,tidy$nascidos_vivos_anomalia,tidy$smr #valores que mudam na legenda
+) %>% lapply(htmltools::HTML)
+
+leaflet(tidy) %>%
+  addProviderTiles(providers$OpenStreetMap.Mapnik) %>%
+  addScaleBar(position = c("bottomleft"), options = scaleBarOptions(imperial= FALSE)) %>%
+  addPolygons(fillColor = ~cores_legenda(smr),
+              weight = 1.5,
+              opacity = 0.7,
+              fillOpacity = 0.7,
+              color = "gray",
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                fillOpacity = 0.7,
+                bringToFront = TRUE),
+              label = legenda_reativa,
+              labelOptions = labelOptions(
+                style = list("font-weight" = "normal", padding = "6px 11px"),
+                textsize = "10px",
+                direction = "auto")) %>%
+addLegend(pal = cores_legenda, values = ~smr, opacity = 1, title = "smr")
+              
+```
+
+### Dispersão
+
+```{r}
+
+tidy$variancia_smr = tidy$smr/tidy$valor_esperado
+
+graf2 = ggplot(tidy) +
+  geom_point(aes(x= log(numero_nascidos_vivos), y = smr, size=variancia_smr, text = paste('area' = NOMEMUN,
+                                                                                          '<br>smr:', round(smr,3),
+                                                                                          '<br>pop:', numero_nascidos_vivos,
+                                                                                          '<br>var_smr:', round(variancia_smr,3)))) +
+  geom_hline(yintercept=1, linetype="dashed", color = "red")
+ggplotly(graf2, tooltip = "text")
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+## Bayesiano 
+
+```{r}
+tidy <- tidy %>%
+  filter(!(CODMUNRES %in% c(350000,352040)))
+
+
+
+nb <- poly2nb(tidy)
+nb2INLA("map.adj", nb)
+g <- inla.read.graph(filename = "map.adj")
+
+formula = nascidos_vivos_anomalia ~ 1 + f( regiao ,
+                                           model = "bym2",
+                                           graph =g ,
+                                           scale.model = TRUE ,
+                                           constr = TRUE ,
+                                           hyper = list(
+                                             phi = list(
+                                               prior = "pc",
+                                               param = c(0.5 , 2/3) ,
+                                               initial = -3) ,
+                                             prec = list(
+                                               prior = "pc.prec",
+                                               param = c(0.2 /0.31 , 0.01) ,
+                                               initial = 5) ))
+
+
+proporcao_media <- sum(tidy$nascidos_vivos_anomalia)/sum(tidy$numero_nascidos_vivos)
+valor_esperado <- tidy$numero_nascidos_vivos*proporcao_media
+
+tidy$regiao <- 1:nrow(tidy)
+
+result = inla(formula , data = tidy , family = "poisson", E =valor_esperado ,
+              control.predictor = list( compute = TRUE ),verbose = FALSE)
+
+res <- result
+map <- tidy
+
+
+map$RR <- res$summary.fitted.values[, "mean"]
+map$LL <- res$summary.fitted.values[, "0.025quant"]
+map$UL <- res$summary.fitted.values[, "0.975quant"]
+
+```
+
+
+### Mapa RR
+
+```{r}
+mapsf <- st_as_sf(map)
+cores_legenda <- colorNumeric("RdYlBu", domain = map$RR, reverse = TRUE)
+
+
+tidy = st_as_sf(map)
+tidy <- st_transform(tidy, "+init=epsg:4326") 
+
+#mapa
+cores_legenda <- colorNumeric("RdYlBu", domain = tidy$smr, reverse = TRUE)
+
+legenda_reativa <- sprintf(
+  "<strong> Municipio: %s </strong> <br/> valor esperado: %s <br/> Número anomalias: %s <br/>  smr: %s <br/>  RR: %s", #escrita estatica
+  tidy$NOMEMUN,tidy$valor_esperado,tidy$nascidos_vivos_anomalia,tidy$smr,tidy$RR #valores que mudam na legenda
+) %>% lapply(htmltools::HTML)
+
+leaflet(tidy) %>%
+  addProviderTiles(providers$OpenStreetMap.Mapnik) %>%
+  addScaleBar(position = c("bottomleft"), options = scaleBarOptions(imperial= FALSE)) %>%
+  addPolygons(fillColor = ~cores_legenda(RR),
+              weight = 1.5,
+              opacity = 0.7,
+              fillOpacity = 0.7,
+              color = "gray",
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                fillOpacity = 0.7,
+                bringToFront = TRUE),
+              label = legenda_reativa,
+              labelOptions = labelOptions(
+                style = list("font-weight" = "normal", padding = "6px 11px"),
+                textsize = "10px",
+                direction = "auto")) %>%
+  addLegend(pal = cores_legenda, values = ~RR, opacity = 1, title = "RR")
+```
+
+
+### Grafico Dispersão
+
+```{r}
+tidy$variancia_smr = tidy$RR / tidy$valor_esperado
+
+graf2 = ggplot(tidy) +
+  geom_point(aes(
+    x = log(numero_nascidos_vivos),
+    y = RR,
+    size = variancia_smr,
+    text = paste(
+      'area' = NOMEMUN,
+      '<br>RR:',
+      round(RR, 6),
+            '<br>SMR:',
+      round(smr, 6),
+      '<br>pop:',
+      numero_nascidos_vivos,
+      '<br>var_smr:',
+      round(variancia_smr, 3)
+    )
+  )) +
+  geom_hline(yintercept = 1,
+             linetype = "dashed",
+             color = "red")
+ggplotly(graf2, tooltip = "text")
+
+```
+
+
+
