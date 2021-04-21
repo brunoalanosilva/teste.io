@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE)
 library(knitr)
 library(readxl)
 library(plotly)
@@ -50,6 +50,8 @@ rowCallback <- c(
 
 ## Gráfico por número de nascimentos
 
+### Considerando todos os estabelecimentos
+
 ```{r echo=FALSE}
 aux <- banco_conj %>%
   top_n(20, n_nascimentos) %>%
@@ -71,9 +73,33 @@ ggplotly(plot_barras)
 
 
 
+### Sem considerar estabelecimentos de Porto Alegre
+
+```{r}
+aux <- banco_conj %>%
+  filter(CODMUNNASC != 431490) %>%
+  top_n(20, n_nascimentos) %>%
+  arrange(n_nascimentos)
+
+names(aux)[8] = c("nome_estab")
+ordem <- aux$nome_estab
+
+
+plot_barras <- ggplot(aux, aes(x = nome_estab, y = n_nascimentos)) +
+  geom_col(fill = "darkmagenta", alpha = 1) +
+  labs(x = "", y = "Nº nascimentos") +
+  scale_x_discrete(limits = ordem) +
+  coord_flip()
+  #labs(title = "20 estabelecimentos com maior nº de nascimentos")
+
+ggplotly(plot_barras)
+
+```
 
 
 ## Gráfico por número de anomalias
+
+### Considerando todos os estabelecimentos
 
 ```{r echo=FALSE}
 aux <- banco_conj %>%
@@ -94,7 +120,33 @@ ggplotly(plot_barras)
 
 ```
 
+
+### Sem considerar estabelecimentos de Porto Alegre
+
+```{r}
+aux <- banco_conj %>%
+  filter(CODMUNNASC != 431490) %>%
+  top_n(20, n_anomalias) %>%
+  arrange(n_anomalias)
+
+names(aux)[8] = c("nome_estab")
+ordem <- aux$nome_estab
+
+
+plot_barras <- ggplot(aux, aes(x = nome_estab, y = n_anomalias)) +
+  geom_col(fill = "darkmagenta", alpha = 1) +
+  labs(x = "", y = "Nº anomalias") +
+  scale_x_discrete(limits = ordem) +
+  coord_flip()
+
+ggplotly(plot_barras)
+
+```
+
+
 ## Tabela 
+
+### Considerando todos os estabelecimentos
 
 ```{r echo=FALSE}
 aux <- banco_conj %>%
@@ -108,6 +160,24 @@ aux %>%
             options = list(scrollX = TRUE,
                            rowCallback = JS(rowCallback)))
 ```
+
+### Sem considerar estabelecimentos de Porto Alegre
+
+```{r echo=FALSE}
+aux <- banco_conj %>%
+  filter(CODMUNNASC != 431490) %>%
+  select(CODESTAB,`NOME FANTASIA`,MUNICIPIO,n_nascimentos,n_anomalias) %>%
+  arrange(desc(n_nascimentos))
+
+
+
+aux %>%
+  datatable(rownames = F,
+            options = list(scrollX = TRUE,
+                           rowCallback = JS(rowCallback)))
+```
+
+
 
 
 ## Estabelecimentos ignorados 
