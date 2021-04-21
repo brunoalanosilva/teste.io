@@ -1,0 +1,127 @@
+---
+title: "relatorio estabelescimentos"
+author: "Bruno Alano"
+date: "4/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(readxl)
+library(plotly)
+library(tidyverse)
+library(DT)
+library(ggplot2)
+```
+
+```{r include=FALSE}
+banco_estab <- read.csv("H:\\downloads\\Arq_825016272\\banco_estab_rs.csv")
+
+nome_estab <- readxl::read_xlsx("H:\\downloads\\Arq_825016272\\base_cnes.xlsx")
+```
+
+```{r include=FALSE}
+
+banco_estab_l <- banco_estab %>%
+  filter(!is.na(CODESTAB))
+
+banco_conj <- dplyr::inner_join(banco_estab_l,nome_estab,by=c("CODESTAB"="CNES"))
+
+teste <- dplyr::anti_join(banco_estab_l,nome_estab,by=c("CODESTAB"="CNES"))
+
+
+
+rowCallback <- c(
+  "function(row, data){",
+  "  for(var i=0; i<data.length; i++){",
+  "    if(data[i] === null){",
+  "      $('td:eq('+i+')', row).html('NA')",
+  "        .css({'color': 'rgb(151,151,151)', 'font-style': 'italic'});",
+  "    }",
+  "  }",
+  "}"  
+)
+
+```
+
+
+
+
+## Gráfico por número de nascimentos
+
+```{r echo=FALSE}
+aux <- banco_conj %>%
+  top_n(20, n_nascimentos) %>%
+  arrange(n_nascimentos)
+
+names(aux)[8] = c("nome_estab")
+ordem <- aux$nome_estab
+
+
+plot_barras <- ggplot(aux, aes(x = nome_estab, y = n_nascimentos)) +
+  geom_col(fill = "darkmagenta", alpha = 1) +
+  labs(x = "", y = "Nº nascimentos") +
+  scale_x_discrete(limits = ordem) +
+  coord_flip()
+  #labs(title = "20 estabelecimentos com maior nº de nascimentos")
+
+ggplotly(plot_barras)
+```
+
+
+
+
+
+## Gráfico por número de anomalias
+
+```{r echo=FALSE}
+aux <- banco_conj %>%
+  top_n(20, n_anomalias) %>%
+  arrange(n_anomalias)
+
+names(aux)[8] = c("nome_estab")
+ordem <- aux$nome_estab
+
+
+plot_barras <- ggplot(aux, aes(x = nome_estab, y = n_anomalias)) +
+  geom_col(fill = "darkmagenta", alpha = 1) +
+  labs(x = "", y = "Nº anomalias") +
+  scale_x_discrete(limits = ordem) +
+  coord_flip()
+
+ggplotly(plot_barras)
+
+```
+
+## Tabela 
+
+```{r echo=FALSE}
+aux <- banco_conj %>%
+  select(CODESTAB,`NOME FANTASIA`,MUNICIPIO,n_nascimentos,n_anomalias) %>%
+  arrange(desc(n_nascimentos))
+
+
+
+aux %>%
+  datatable(rownames = F,
+            options = list(scrollX = TRUE,
+                           rowCallback = JS(rowCallback)))
+```
+
+
+## Estabelecimentos ignorados 
+
+Esses estabelecimentos foram ignorados pois não foi possível encontrar correspondência entre o código do estabelecimento e a base de dados do CNES.
+
+```{r echo=FALSE}
+teste %>%
+  arrange(desc(n_nascimentos)) %>%
+  datatable(rownames = F,
+            options = list(scrollX = TRUE,
+                           rowCallback = JS(rowCallback)))
+```
+
+
+
+
