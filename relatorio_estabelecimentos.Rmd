@@ -1,7 +1,7 @@
 ---
-title: "relatorio estabelescimentos"
-author: "Bruno Alano"
-date: "4/21/2021"
+title: "Nascimentos e Anomalias por estabelecimento de Saúde do RS"
+author: "Grupo de epidemiologia do projeto Anomalias Congênitas"
+date: "21/04/2021"
 output: html_document
 ---
 
@@ -46,6 +46,9 @@ rowCallback <- c(
 ```
 
 
+## Dados
+
+Os dados obtidos são do SINASC do período de 2010-2019, por simplicidade foram considerados os nascimentos de mães residentes do Rio grande do Sul.
 
 
 ## Gráfico por número de nascimentos
