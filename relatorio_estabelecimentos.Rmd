@@ -1,8 +1,9 @@
 ---
 title: "Nascimentos e Anomalias por estabelecimento de Saúde do RS"
 author: "Grupo de epidemiologia do projeto Anomalias Congênitas"
-date: "21/04/2021"
+date: "22/04/2021"
 output: html_document
+runtime: shiny
 ---
 
 ```{r setup, include=FALSE}
@@ -13,25 +14,122 @@ library(plotly)
 library(tidyverse)
 library(DT)
 library(ggplot2)
+library(shiny)
 ```
 
 ```{r include=FALSE}
-banco_estab <- read.csv("H:\\downloads\\Arq_825016272\\banco_estab_rs.csv")
+banco_estab <- read.csv("banco_estab_rs.csv")
 
-nome_estab <- readxl::read_xlsx("H:\\downloads\\Arq_825016272\\base_cnes.xlsx")
+nome_estab <- readxl::read_xlsx("base_cnes.xlsx")
+
+names(nome_estab)[5] = c("nome_estab")
+
+estab_anom <- read.csv("banco_anomalias_estab.csv")
 ```
 
-```{r include=FALSE}
+```{r echo=FALSE}
+selectizeInput(
+  "ano_grafico",
+  label = "Escolha o ano a ser considerado",
+  choices = 2019:2010,
+  multiple = TRUE,
+  selected = "2019"
+)
 
+cids_values <- c("Cardiopatias congênitas",                                              
+                 "Defeitos de parede abdominal",                                         
+                 "Defeitos de redução de membros/ pé torto/ artrogripose / polidactilia",
+                 "Defeitos de Tubo Neural",                                              
+                 "Fendas orais",                                                         
+                 "hipospadia",                                                           
+                 "Microcefalia",                                                         
+                 "Sexo indefinido",                                                      
+                 "Síndrome de Down","Outras anomalias")   
+
+cids_values2 <- c("Cardiopatias congênitas – CID Q20, Q21, Q22, Q23, Q24, Q25, Q26, Q27, Q28",
+                  "Defeitos de parede abdominal – CID Q79.2 Q79.3",
+                  "Defeitos de redução de membros/ pé torto/ artrogripose / polidactilia – CID Q66, Q69, Q71, Q72, Q73 e Q74.3",
+                  "Defeitos de Tubo Neural – CID Q00.0, Q00.1, Q00.2, Q01 e Q05",
+                  "Fendas orais – CID Q35, Q36 e Q37",
+                  "hipospadia - CID  Q54",
+                  "Microcefalia – CID Q02",
+                  "Sexo indefinido CID Q56",
+                  "Síndrome de Down – CID Q90","Outras anomalias")
+```
+
+
+```{r echo=FALSE}
+checkboxGroupInput(label = NULL,
+                   "checkbox_cid",
+                   selected = 1,
+                   choiceNames = cids_values2,
+                   choiceValues = 1:10,width = "100%"
+)
+```
+
+```{r}
+
+renderText(input$checkbox_cid)
+```
+
+
+```{r}
+renderText(as.numeric(input$checkbox_cid))
+```
+
+
+```{r include=FALSE}
 banco_estab_l <- banco_estab %>%
   filter(!is.na(CODESTAB))
 
-banco_conj <- dplyr::inner_join(banco_estab_l,nome_estab,by=c("CODESTAB"="CNES"))
+# banco_conj <- dplyr::inner_join(banco_estab_l,nome_estab,by=c("CODESTAB"="CNES"))
+# 
+# teste <- dplyr::anti_join(banco_estab_l,nome_estab,by=c("CODESTAB"="CNES"))
+```
 
-teste <- dplyr::anti_join(banco_estab_l,nome_estab,by=c("CODESTAB"="CNES"))
+
+```{r include=FALSE}
+banco_conj_filt <- reactive({
+  aux <- banco_estab_l %>%
+    filter(ANONASC %in% input$ano_grafico) %>%
+    group_by(CODESTAB,CODMUNNASC) %>%
+    summarise(n_anomalias = sum(n_anomalias),n_nascimentos = sum(n_nascimentos)) %>%
+    ungroup()
+  
+  
+  aux2 <- inner_join(aux, nome_estab,by=c("CODESTAB"="CNES"))
+  aux2 %>%
+    select(CODESTAB,nome_estab,MUNICIPIO,CODMUNNASC,n_nascimentos,n_anomalias) %>%
+    arrange(desc(n_nascimentos))
+})
 
 
+banco_anomalia_filtro <- reactive({
+  aux <- banco_estab_l %>%
+    filter(ANONASC %in% input$ano_grafico) %>%
+    group_by(CODESTAB,CODMUNNASC) %>%
+    summarise(n_anomalias = sum(n_anomalias),n_nascimentos = sum(n_nascimentos)) %>%
+    ungroup()
+  
+  
+  aux2 <- inner_join(aux, nome_estab,by=c("CODESTAB"="CNES"))
+  aux2 %>%
+    select(CODESTAB,nome_estab,MUNICIPIO,CODMUNNASC,n_nascimentos,n_anomalias) %>%
+    arrange(desc(n_nascimentos))
+})
 
+
+teste_filtro  <- reactive({
+  aux <- banco_estab_l %>%
+    filter(ANONASC %in% input$ano_grafico) %>%
+    group_by(CODESTAB,CODMUNNASC) %>%
+    summarise(n_anomalias = sum(n_anomalias),n_nascimentos = sum(n_nascimentos))  
+  
+  final <- anti_join(aux,nome_estab,by=c("CODESTAB"="CNES"))
+})
+```
+
+```{r include=FALSE}
 rowCallback <- c(
   "function(row, data){",
   "  for(var i=0; i<data.length; i++){",
@@ -56,47 +154,45 @@ Os dados obtidos são do SINASC do período de 2010-2019, por simplicidade foram
 ### Considerando todos os estabelecimentos
 
 ```{r echo=FALSE}
-aux <- banco_conj %>%
-  top_n(20, n_nascimentos) %>%
-  arrange(n_nascimentos)
+renderPlotly({
+  aux <- banco_conj_filt() %>%
+    top_n(20,n_nascimentos) %>%
+    arrange(n_nascimentos)
+  
+  ordem <- aux$nome_estab
+  
+  plot_barras <- ggplot(aux , aes(x = nome_estab, y = n_nascimentos)) +
+    geom_col(fill = "darkmagenta", alpha = 1) +
+    labs(x = "", y = "Nº nascimentos") +
+    scale_x_discrete(limits = ordem) +
+    coord_flip()
+  
+  ggplotly(plot_barras)
+})
 
-names(aux)[8] = c("nome_estab")
-ordem <- aux$nome_estab
-
-
-plot_barras <- ggplot(aux, aes(x = nome_estab, y = n_nascimentos)) +
-  geom_col(fill = "darkmagenta", alpha = 1) +
-  labs(x = "", y = "Nº nascimentos") +
-  scale_x_discrete(limits = ordem) +
-  coord_flip()
-  #labs(title = "20 estabelecimentos com maior nº de nascimentos")
-
-ggplotly(plot_barras)
 ```
 
 
 
 ### Sem considerar estabelecimentos de Porto Alegre
 
-```{r}
-aux <- banco_conj %>%
-  filter(CODMUNNASC != 431490) %>%
-  top_n(20, n_nascimentos) %>%
-  arrange(n_nascimentos)
-
-names(aux)[8] = c("nome_estab")
-ordem <- aux$nome_estab
-
-
-plot_barras <- ggplot(aux, aes(x = nome_estab, y = n_nascimentos)) +
-  geom_col(fill = "darkmagenta", alpha = 1) +
-  labs(x = "", y = "Nº nascimentos") +
-  scale_x_discrete(limits = ordem) +
-  coord_flip()
-  #labs(title = "20 estabelecimentos com maior nº de nascimentos")
-
-ggplotly(plot_barras)
-
+```{r echo=FALSE}
+renderPlotly({
+  aux <- banco_conj_filt() %>%
+    filter(CODMUNNASC != 431490) %>%
+    top_n(20,n_nascimentos) %>%
+    arrange(n_nascimentos)
+  
+  ordem <- aux$nome_estab
+  
+  plot_barras <- ggplot(aux , aes(x = nome_estab, y = n_nascimentos)) +
+    geom_col(fill = "darkmagenta", alpha = 1) +
+    labs(x = "", y = "Nº nascimentos") +
+    scale_x_discrete(limits = ordem) +
+    coord_flip()
+  
+  ggplotly(plot_barras)
+})
 ```
 
 
@@ -105,44 +201,43 @@ ggplotly(plot_barras)
 ### Considerando todos os estabelecimentos
 
 ```{r echo=FALSE}
-aux <- banco_conj %>%
-  top_n(20, n_anomalias) %>%
-  arrange(n_anomalias)
-
-names(aux)[8] = c("nome_estab")
-ordem <- aux$nome_estab
-
-
-plot_barras <- ggplot(aux, aes(x = nome_estab, y = n_anomalias)) +
-  geom_col(fill = "darkmagenta", alpha = 1) +
-  labs(x = "", y = "Nº anomalias") +
-  scale_x_discrete(limits = ordem) +
-  coord_flip()
-
-ggplotly(plot_barras)
-
+renderPlotly({
+  aux <- banco_conj_filt() %>%
+    top_n(20,n_nascimentos) %>%
+    arrange(n_anomalias)
+  
+  ordem <- aux$nome_estab
+  
+  plot_barras <- ggplot(aux , aes(x = nome_estab, y = n_anomalias)) +
+    geom_col(fill = "darkmagenta", alpha = 1) +
+    labs(x = "", y = "Nº anomalias") +
+    scale_x_discrete(limits = ordem) +
+    coord_flip()
+  
+  ggplotly(plot_barras)
+})
 ```
 
 
 ### Sem considerar estabelecimentos de Porto Alegre
 
-```{r}
-aux <- banco_conj %>%
-  filter(CODMUNNASC != 431490) %>%
-  top_n(20, n_anomalias) %>%
-  arrange(n_anomalias)
-
-names(aux)[8] = c("nome_estab")
-ordem <- aux$nome_estab
-
-
-plot_barras <- ggplot(aux, aes(x = nome_estab, y = n_anomalias)) +
-  geom_col(fill = "darkmagenta", alpha = 1) +
-  labs(x = "", y = "Nº anomalias") +
-  scale_x_discrete(limits = ordem) +
-  coord_flip()
-
-ggplotly(plot_barras)
+```{r eval=FALSE, include=FALSE}
+renderPlotly({
+  aux <- banco_conj_filt() %>%
+    filter(CODMUNNASC != 431490) %>%    
+    top_n(20,n_nascimentos) %>%
+    arrange(n_anomalias)
+  
+  ordem <- aux$nome_estab
+  
+  plot_barras <- ggplot(aux , aes(x = nome_estab, y = n_anomalias)) +
+    geom_col(fill = "darkmagenta", alpha = 1) +
+    labs(x = "", y = "Nº anomalias") +
+    scale_x_discrete(limits = ordem) +
+    coord_flip()
+  
+  ggplotly(plot_barras)
+})
 
 ```
 
@@ -152,32 +247,24 @@ ggplotly(plot_barras)
 ### Considerando todos os estabelecimentos
 
 ```{r echo=FALSE}
-aux <- banco_conj %>%
-  select(CODESTAB,`NOME FANTASIA`,MUNICIPIO,n_nascimentos,n_anomalias) %>%
-  arrange(desc(n_nascimentos))
-
-
-
-aux %>%
+renderDataTable({
+  banco_conj_filt() %>%
   datatable(rownames = F,
             options = list(scrollX = TRUE,
                            rowCallback = JS(rowCallback)))
+})
 ```
 
 ### Sem considerar estabelecimentos de Porto Alegre
 
 ```{r echo=FALSE}
-aux <- banco_conj %>%
-  filter(CODMUNNASC != 431490) %>%
-  select(CODESTAB,`NOME FANTASIA`,MUNICIPIO,n_nascimentos,n_anomalias) %>%
-  arrange(desc(n_nascimentos))
-
-
-
-aux %>%
-  datatable(rownames = F,
-            options = list(scrollX = TRUE,
-                           rowCallback = JS(rowCallback)))
+renderDataTable({
+  banco_conj_filt() %>% 
+    filter(CODMUNNASC != 431490) %>%
+    datatable(rownames = F,
+              options = list(scrollX = TRUE,
+                             rowCallback = JS(rowCallback)))
+})
 ```
 
 
@@ -188,11 +275,14 @@ aux %>%
 Esses estabelecimentos foram ignorados pois não foi possível encontrar correspondência entre o código do estabelecimento e a base de dados do CNES.
 
 ```{r echo=FALSE}
-teste %>%
-  arrange(desc(n_nascimentos)) %>%
-  datatable(rownames = F,
+renderDataTable({
+  aux <- teste_filtro() %>%
+    arrange(desc(n_nascimentos)) 
+  
+  datatable(aux , rownames = F,
             options = list(scrollX = TRUE,
                            rowCallback = JS(rowCallback)))
+})
 ```
 
 

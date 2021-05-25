@@ -1,0 +1,170 @@
+---
+title: "Bayesiana_prova2"
+author: "Bruno Alano & Gustavo Utpott"
+output:
+  bookdown::html_document2: default
+  bookdown::pdf_document2: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(plotly)
+```
+
+## Dados {-}
+
+Um produtor de tomates decidiu realizar um estudo para comparar duas espécies de tomateiro, chamaremos de tomateiro A e tomateiro B, a região onde o agricultor planta os tomates tem períodos de seca, por esse motivo a quantidade de água usada tem que ser levada em conta quando quisermos comparar os tomateiros.
+No estudo foi plantado 400 tomateiros, sendo 200 de cada espécie e atribuidos diferentes quantidades de água em cada pé, ao final foi calculado quantos quilos cada pé de tomateiro produziu de tomates.  
+
+
+Y =  quantidade em KG produzidos de tomate
+
+X1 = quantidade de água em Litros em certo período fixo no tempo (valores variam de 2.5 até 10)
+
+X2 = espécie do tomateiro (0 = A ou 1 = B)
+
+
+```{r}
+n <- 400
+X1 <- runif(n,2.5,10)
+X2 <- rep(c(0,1),n/2)
+
+des.p <- 1
+
+Y  =  rnorm(mean = 0 + 1*X1 + (25/6)*X2 - (2/3)*X2*X1,n = n,sd = des.p)
+```
+
+## Descritiva {-}
+
+```{r, out.width="100%"}
+
+dados <- data.frame(Y,X1,X2) %>%
+  mutate(X2_fator = factor(X2, labels = c("Espécie A","Espécie B")))
+  
+ggplotly(ggplot(dados)+
+  geom_point(mapping = aes(x = X1,y=Y,color=X2_fator)) +
+  scale_color_discrete("Espécie do tomateiro") +
+  labs(x = "Quantidade de água em Litros", y = "Quantidade em Kg de tomate")) %>%
+        layout(legend = list(
+          orientation = "v",
+          x = 0.01,
+          y = 0.95
+        ))
+
+```
+
+## Prioris {-}
+
+Optamos por usar prioris semi-conjugadas não informativas.
+
+Dada a equação da reta que queremos estimar:
+
+$$Y = \beta_0+\beta_1X_1+\beta_2X_2+\beta_3X_1X_2+\epsilon$$
+
+onde $\epsilon \sim N(0,\sigma^2)$
+
+$\beta_0 \sim N(0,100000)$
+$\beta_1 \sim N(0,100000)$
+$\beta_2 \sim N(0,100000)$
+$\beta_3 \sim N(0,100000)$
+$\tau =\frac{1}{\sigma^2} \sim \gamma(0.01,0.01)$
+
+
+
+## MCMC {-}
+
+No open bugs, com 100 000 interações, considerando um burn in de 100 todos parametros convergiram(imagem 0). A autocorrelação aparenta estar um pouco alta para os betas nos primeiros lags(Imagem 1), e escolhendo um thin de 70 a autocorrelação melhora para os betas(Imagem 2).
+
+![Imagem 0 - Burn in](open_bugs_resultados_1/burn_in_beta0.PNG)
+
+
+Erro de monte-carlo. Para avaliar se o erro de Monte Carlo é grande para as 100 000 interações que fizemos olhamos para a imagem(Imagem 3), e usamos a regra de bolso de que o erro de monte-carlo deva ser menor que o desvio padrão dividido por 20. 
+
+
+```{r}
+mc_error <- c(0.006766,0.00101,0.00874,0.00140)
+sd_betas <- c(0.2207,0.03334,0.3084,0.04763)
+mc_error < sd_betas/20
+```
+E para todos betas isso ocorreu.
+
+
+
+![Imagem 1 - Autocorrelação](open_bugs_resultados_1/autocorrelacao.PNG)
+
+![Imagem 2 - Autocorrelação thin 70](open_bugs_resultados_1/autocorrelacao_thin_70.PNG)
+
+![Imagem 3 - Parâmetros e Erro de Monte Carlo](open_bugs_resultados_1/erro_monte_carlo.PNG)
+
+
+## Resultados {-}
+
+As interpretações para os $\beta_0$ e $\beta_2$ não são válidas pois são o intecepto do eixo Y quando a quantidade de água aplicada é 0, porém essa quantidade não está no intervalo amostrado. Olhando para os parâmetros (Imagem 3). É possível verificar que o termo da interação entre X1 e X2 foi de -0.66 com intervalo de credibilidade central 95% entre (-0.7651;-0.5727), então claramente é possível perceber que esse efeito da interação entre o tipo de tomate e a quantidade de água é relevante para a análise, podendo-se inferir que o aumento na quantidade de água no tipo de tomate B não é tão efetivo quanto aumentar a quantidade de água para o tipo de tomate A, temos por exemplo que espera-se que o tomateiro B irá gerar menos 0.66 Kg de tomate para cada 1 litro a mais de água aplicada do que quando comparado a aplicação de água no tomateiro A(muito perto do que se simulou que foi 2/3). Apesar disso tanto o tomateiro A quanto o B se beneficiam do aumento de água aplicada, o efeito no tomateiro A é apenas mais forte e espera-se que com o aumento de 1L de água aplicada isso resulte em um aumento mediano de 0.9794(IC95%: 0.9141;1.045). 
+
+
+
+
+
+```{r echo=FALSE}
+betas <- c(0.1519,0.9793,4.13,-0.6696)
+
+
+plot_ly() %>%
+  add_segments(x = 2.5,xend = 10,y = (betas[1] + betas[2]*2.5),yend = (betas[1] + betas[2]*10), name = "Espécie A") %>%
+  add_segments(x = 2.5,xend = 10,y =  (betas[1] + betas[3] + (betas[2] + betas[4])*2.5),
+               yend = (betas[1] + betas[3] + (betas[2] + betas[4])*10), name = "Espécie B") %>%
+  layout(title = "Retas estimadas via mediana da posteriori",
+         xaxis = list(title = "Quantidade de agua"), yaxis  = list(title = "Quantidade de tomates produzidos"))
+
+
+```
+Com os valores estimados pela mediana da posteriori é possível crias as retas da regressão estimadas para cada espécie, com esse gráfico os pontos onde a Espécie B é superior a A (quantidade de agua < 6), os pontos elas são parecidas (quantidade de agua entre 6 e 6.5) e os pontos onde a Espécie A é superior (quantidade de agua > 6.5), ficando a cargo do agricultor calcular a quantidade de água que vai ter disponivel na estação para obter o melhor desempenho.
+
+
+## Resíduos {-}
+
+```{r echo=FALSE}
+dados <- readxl::read_excel("dados.xlsx",range = "A1:E401")
+
+
+
+y_estimado <- betas[1] + betas[2]*dados$X1 + betas[3]*dados$X2 + betas[4]*dados$X1*dados$X2
+
+base <- data.frame(Y = dados$Y,y_estimado)
+
+r_2 <-  1 - sum((dados$Y - y_estimado)^2)/sum((dados$Y - mean(dados$Y))^2)
+
+
+
+a <- list(
+  x = 8,
+  y = 3,
+  text = "R^2 = 0.7155",
+  xref = "x",
+  yref = "y",
+  showarrow = TRUE,
+  arrowhead = 7,
+  ax = 20,
+  ay = -40
+)
+
+plot_ly(data = base,x = ~Y,y = ~y_estimado,type = "scatter",mode = "markers",name = "") %>%
+  add_segments(x = 1,xend = 12,y = 1 , yend= 12 , name = "Reta Y=X") %>%
+  layout(title = "Valor Observado Vs valor predito", xaxis = list(title = "Valor observado"),yaxis = list(title = "Valor predito")) %>%
+  add_annotations(
+    x= 10,
+    y= 3,
+    #xref = "paper",
+    #yref = "paper",
+    text = "R² = 0.7155",
+    showarrow = F
+  )
+
+
+
+```
+Com esse gráfico podemos verificar a qualidade da predição com a reta estimada via mediana com os valores observados, a reta está bem ajustada mas mostra que existe uma alta variabilidade presente nos dados, isto tambem pode ser observado pelo $R^2$ não estar muito próximo de 1.
+
+
+

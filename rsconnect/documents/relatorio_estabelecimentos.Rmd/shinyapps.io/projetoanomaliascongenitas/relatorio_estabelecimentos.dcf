@@ -1,0 +1,12 @@
+name: relatorio_estabelecimentos
+title: relatorio_estabelecimentos
+username:
+account: projetoanomaliascongenitas
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 4015462
+bundleId: 4506553
+url: https://projetoanomaliascongenitas.shinyapps.io/relatorio_estabelecimentos/
+when: 1619120843.16513
+asMultiple: FALSE
+asStatic: FALSE
